@@ -11,28 +11,27 @@ import { createReport, getReportsQuery, incrementReportDownload, type Report } f
 import { formatDistanceToNow } from "date-fns";
 
 const TEMPLATES = [
-  { name: "Executive Summary", icon: TrendingUp, color: "cyan", desc: "High-level overview for leadership" },
-  { name: "Technical Audit", icon: Shield, color: "blue", desc: "Detailed technical findings & CVEs" },
-  { name: "Compliance Report", icon: FileText, color: "purple", desc: "Regulatory compliance status" },
-  { name: "Risk Assessment", icon: AlertTriangle, color: "orange", desc: "Risk scoring and prioritization" },
+  { name: "Scan Summary", icon: TrendingUp, color: "cyan", desc: "Overview of scan data recorded in your account" },
+  { name: "Technical Findings", icon: Shield, color: "blue", desc: "Findings and scanner-provided details" },
+  { name: "Finding Severity Summary", icon: FileText, color: "purple", desc: "Counts by severity in recorded findings" },
+  { name: "Scan Activity", icon: AlertTriangle, color: "orange", desc: "Scan status and results from available jobs" },
 ];
 
 export function Reports() {
-  const { user } = useAuth();
+  const { user, emailVerified, ensureEmailVerified } = useAuth();
   const { scans, assets, findingsList, completedCount } = useScanContext();
   const [reports, setReports] = useState<(Report & { id: string })[]>([]);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState("Executive Summary");
+  const [selectedTemplate, setSelectedTemplate] = useState("Scan Summary");
   const [selectedPeriod, setSelectedPeriod] = useState("Last 30 days");
   const [selectedFormat, setSelectedFormat] = useState("PDF");
   const [generating, setGenerating] = useState(false);
-  const [scheduleForm, setScheduleForm] = useState({ title: "", frequency: "weekly", recipients: "" });
-  const [scheduling, setScheduling] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(getReportsQuery(), snap => {
-      setReports(snap.docs.map(d => ({ id: d.id, ...d.data() } as Report & { id: string })));
+      setReports(snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Report & { id: string }))
+        .sort((a, b) => (b.generatedAt?.toMillis?.() || 0) - (a.generatedAt?.toMillis?.() || 0)));
     }, () => {});
     return unsub;
   }, []);
@@ -46,6 +45,7 @@ export function Reports() {
   }).length;
 
   const handleGenerate = async () => {
+    if (!(await ensureEmailVerified())) return;
     if (!user) { toast.error("You must be signed in."); return; }
     setGenerating(true);
     try {
@@ -60,7 +60,7 @@ export function Reports() {
         }
       );
       setShowGenerateModal(false);
-      toast.success("Report queued", { description: `Your ${selectedTemplate} is being generated.` });
+      toast.success("Report ready to export", { description: "Its PDF will be assembled when you download it." });
     } catch (err: any) {
       toast.error("Failed to generate: " + (err?.message || "Unknown error"));
     } finally {
@@ -69,10 +69,10 @@ export function Reports() {
   };
 
   const handleDownload = async (report: Report & { id: string }) => {
+    if (!(await ensureEmailVerified())) return;
     if (report.status !== "ready") { toast.info("Report is still generating…"); return; }
-    await incrementReportDownload(report.id);
-
     try {
+      await incrementReportDownload(report.id);
       const { jsPDF } = await import("jspdf");
       const autoTable = (await import("jspdf-autotable")).default;
 
@@ -221,14 +221,14 @@ export function Reports() {
     }
   };
 
-  const handleSchedule = async () => {
-    if (!scheduleForm.title.trim()) { toast.error("Please enter a report title."); return; }
-    setScheduling(true);
-    await new Promise(r => setTimeout(r, 800));
-    setScheduling(false);
-    setShowScheduleModal(false);
-    setScheduleForm({ title: "", frequency: "weekly", recipients: "" });
-    toast.success("Report scheduled", { description: `"${scheduleForm.title}" will run ${scheduleForm.frequency}.` });
+  const handleScheduleUnavailable = async () => {
+    if (!(await ensureEmailVerified())) return;
+    toast.info("Scheduled reports are not available yet.");
+  };
+
+  const openGenerateModal = async () => {
+    if (!(await ensureEmailVerified())) return;
+    setShowGenerateModal(true);
   };
 
   return (
@@ -239,10 +239,10 @@ export function Reports() {
           <p className="text-gray-400">Security intelligence reports and analytics</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setShowScheduleModal(true)} className="px-3 md:px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-2 transition-all text-sm">
-            <Calendar className="w-4 h-4" /><span className="hidden sm:inline">Schedule</span>
+          <button onClick={handleScheduleUnavailable} disabled={!emailVerified} title={!emailVerified ? "Verify your email to access report actions" : "Scheduled reports are not available yet"} className="px-3 md:px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-2 transition-all text-sm disabled:opacity-50">
+            <Calendar className="w-4 h-4" /><span className="hidden sm:inline">Schedule (unavailable)</span>
           </button>
-          <button onClick={() => setShowGenerateModal(true)} className="px-3 md:px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 flex items-center gap-2 transition-all text-sm">
+          <button onClick={openGenerateModal} disabled={!emailVerified} title={!emailVerified ? "Verify your email before generating reports" : undefined} className="px-3 md:px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 flex items-center gap-2 transition-all text-sm disabled:opacity-50">
             <Plus className="w-4 h-4" /><span>Generate</span>
           </button>
         </div>
@@ -299,7 +299,7 @@ export function Reports() {
             </div>
             <h3 className="text-base font-semibold text-gray-300 mb-2">No reports generated yet</h3>
             <p className="text-gray-500 text-sm mb-4 max-w-xs mx-auto">Generate your first report to get a summary of your security posture.</p>
-            <button onClick={() => setShowGenerateModal(true)} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-sm font-medium transition-all border border-cyan-500/30">
+            <button onClick={openGenerateModal} disabled={!emailVerified} title={!emailVerified ? "Verify your email before generating reports" : undefined} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-sm font-medium transition-all border border-cyan-500/30 disabled:opacity-50">
               <Plus className="w-4 h-4" /> Generate First Report
             </button>
           </div>
@@ -330,18 +330,13 @@ export function Reports() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {report.status === "generating" ? (
-                      <span className="flex items-center gap-1 text-xs text-yellow-400">
-                        <Loader2 className="w-3 h-3 animate-spin" /> Generating…
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-xs text-green-400">
-                        <CheckCircle2 className="w-3 h-3" /> Ready
-                      </span>
-                    )}
+                    <span className="flex items-center gap-1 text-xs text-green-400">
+                      <CheckCircle2 className="w-3 h-3" /> Ready to export
+                    </span>
                     <button
                       onClick={() => handleDownload(report)}
-                      disabled={report.status !== "ready"}
+                      disabled={report.status !== "ready" || !emailVerified}
+                      title={!emailVerified ? "Verify your email before exporting reports" : undefined}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-xs border border-cyan-500/30 transition-all disabled:opacity-40"
                     >
                       <Download className="w-3 h-3" /> Download
@@ -361,7 +356,9 @@ export function Reports() {
           {TEMPLATES.map((template, idx) => (
             <button
               key={idx}
-              onClick={() => { setSelectedTemplate(template.name); setShowGenerateModal(true); }}
+              onClick={() => { setSelectedTemplate(template.name); void openGenerateModal(); }}
+              disabled={!emailVerified}
+              title={!emailVerified ? "Verify your email before generating reports" : undefined}
               className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 p-5 hover:bg-white/10 transition-colors text-left group"
             >
               <div className={`w-12 h-12 rounded-lg bg-${template.color}-500/20 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform`}>
@@ -421,7 +418,7 @@ export function Reports() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowGenerateModal(false)} className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-medium transition-all">Cancel</button>
-              <button onClick={handleGenerate} disabled={generating} className="flex-1 px-4 py-2.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 text-sm font-medium transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+              <button onClick={handleGenerate} disabled={generating || !emailVerified} title={!emailVerified ? "Verify your email before generating reports" : undefined} className="flex-1 px-4 py-2.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 text-sm font-medium transition-all disabled:opacity-60 flex items-center justify-center gap-2">
                 {generating ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating…</> : <><FileText className="w-4 h-4" /> Generate</>}
               </button>
             </div>
@@ -429,42 +426,6 @@ export function Reports() {
         </div>
       )}
 
-      {/* Schedule Modal */}
-      {showScheduleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-xl bg-[#0d0d18] border border-white/10 p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-semibold">Schedule Report</h3>
-              <button onClick={() => setShowScheduleModal(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1.5 text-gray-300">Report Title <span className="text-red-400">*</span></label>
-                <input type="text" placeholder="e.g. Weekly Security Digest" value={scheduleForm.title} onChange={e => setScheduleForm(f => ({ ...f, title: e.target.value }))} className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5 text-gray-300">Frequency</label>
-                <select value={scheduleForm.frequency} onChange={e => setScheduleForm(f => ({ ...f, frequency: e.target.value }))} className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50">
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1.5 text-gray-300">Recipients</label>
-                <input type="text" placeholder="email@example.com" value={scheduleForm.recipients} onChange={e => setScheduleForm(f => ({ ...f, recipients: e.target.value }))} className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50" />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowScheduleModal(false)} className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-medium transition-all">Cancel</button>
-              <button onClick={handleSchedule} disabled={scheduling} className="flex-1 px-4 py-2.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 text-sm font-medium transition-all disabled:opacity-60 flex items-center justify-center gap-2">
-                {scheduling ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
-                {scheduling ? "Saving…" : "Schedule"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

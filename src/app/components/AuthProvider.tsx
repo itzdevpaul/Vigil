@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { sendEmailVerification } from "firebase/auth";
+import { reload, sendEmailVerification } from "firebase/auth";
 import {
   auth,
   loginWithEmailPassword,
@@ -14,6 +14,8 @@ import {
   getNotificationSettings,
   getUserProfile,
   saveNotificationSettings,
+  saveAccountProfile,
+  changeAccountPassword,
   type FirestoreUser,
   type NotificationSettings,
   defaultNotificationSettings,
@@ -50,6 +52,9 @@ interface AuthContextValue {
   signInWithGithub: () => Promise<void>;
   logout: () => Promise<void>;
   resendVerification: () => Promise<void>;
+  ensureEmailVerified: () => Promise<boolean>;
+  updateAccountProfile: (displayName: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   getIdToken: () => Promise<string | null>;
   refreshToken: () => Promise<string | null>;
   notificationSettings: NotificationSettings;
@@ -66,7 +71,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<FirestoreUser | null>(null);
-  const [emailVerified, setEmailVerified] = useState(true); // true until we know otherwise
+  const [emailVerified, setEmailVerified] = useState(false);
   const [loading, setLoading] = useState(true);
   const [firestoreError, setFirestoreError] = useState(false);
   const [notificationSettings, setNotificationSettings] =
@@ -173,14 +178,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         (err) => {
           console.warn("Alerts listener:", err.message);
           setFirestoreError(true);
-          setRawAlerts(DEMO_ALERTS);
-          seenAlertIdsRef.current = new Set(DEMO_ALERTS.map((a) => a.id));
+          setRawAlerts([]);
+          seenAlertIdsRef.current.clear();
           isFirstSnapshotRef.current = false;
         }
       );
     } catch {
-      setRawAlerts(DEMO_ALERTS);
-      seenAlertIdsRef.current = new Set(DEMO_ALERTS.map((a) => a.id));
+      setFirestoreError(true);
+      setRawAlerts([]);
+      seenAlertIdsRef.current.clear();
       isFirstSnapshotRef.current = false;
     }
   }
@@ -236,6 +242,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const ensureEmailVerified = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      toast.error("You must be signed in.");
+      return false;
+    }
+    try {
+      await reload(currentUser);
+      const verified = currentUser.emailVerified;
+      setEmailVerified(verified);
+      if (!verified) {
+        toast.error("Verify your email before making this change. Check your inbox for the verification link.");
+      }
+      return verified;
+    } catch {
+      toast.error("Unable to refresh email verification status. Please try again.");
+      return false;
+    }
+  };
+
+  const updateAccountProfile = async (displayName: string) => {
+    if (!user) throw new Error("You must be signed in.");
+    try {
+      await saveAccountProfile(user.uid, displayName);
+      setUser((current) => current ? { ...current, displayName: displayName.trim() } : current);
+    } catch (error) {
+      const authDisplayName = auth.currentUser?.displayName;
+      setUser((current) => current && authDisplayName
+        ? { ...current, displayName: authDisplayName }
+        : current);
+      throw error;
+    }
+  };
+
+  const changePassword = async (currentPassword: string, newPassword: string) =>
+    changeAccountPassword(currentPassword, newPassword);
+
   const getIdToken = async () => auth.currentUser?.getIdToken() ?? null;
 
   const refreshToken = async () =>
@@ -243,12 +286,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateNotificationSettings = async (settings: NotificationSettings) => {
     if (!user) return;
-    try {
-      const updated = await saveNotificationSettings(user.uid, settings);
-      setNotificationSettings(updated);
-    } catch {
-      setNotificationSettings(settings);
-    }
+    const updated = await saveNotificationSettings(user.uid, settings);
+    setNotificationSettings(updated);
   };
 
   const value = useMemo<AuthContextValue>(
@@ -262,6 +301,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGithub: signInWithGithubProvider,
       logout,
       resendVerification,
+      ensureEmailVerified,
+      updateAccountProfile,
+      changePassword,
       getIdToken,
       refreshToken,
       notificationSettings,
@@ -285,14 +327,3 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
   return ctx;
 }
-
-// ── Demo alerts (shown when Firestore rules block reads) ──────────────────────
-const DEMO_ALERTS: Omit<Alert, "effectivelyRead">[] = [
-  { id: "d1", type: "critical", title: "Critical exposure detected", asset: "api.production.vigil.com.ng", timestamp: null },
-  { id: "d2", type: "warning",  title: "Certificate expiring soon",  asset: "admin.vigil.com.ng",          timestamp: null },
-  { id: "d3", type: "success",  title: "New asset discovered",       asset: "cdn.assets.vigil.com.ng",     timestamp: null },
-  { id: "d4", type: "info",     title: "Scan completed",             asset: "172 assets scanned",     timestamp: null },
-  { id: "d5", type: "critical", title: "Misconfiguration found",     asset: "storage.s3.vigil.com.ng",     timestamp: null },
-  { id: "d6", type: "success",  title: "Risk resolved",              asset: "auth.vigil.com.ng",            timestamp: null },
-];
-

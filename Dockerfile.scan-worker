@@ -1,0 +1,18 @@
+FROM golang:1.24-alpine AS nuclei-builder
+RUN go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.4.10
+
+FROM node:22-bookworm-slim
+ENV NODE_ENV=production
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates nmap \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --system scanner \
+  && useradd --system --gid scanner --create-home scanner
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+COPY --from=nuclei-builder /go/bin/nuclei /usr/local/bin/nuclei
+COPY server/scan-engine.js server/scan-worker.js ./server/
+USER scanner
+RUN nuclei -update-templates
+CMD ["node", "server/scan-worker.js"]

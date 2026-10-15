@@ -4,7 +4,6 @@ import {
   Database,
   Network,
   Globe,
-  Brain,
   Activity,
   FileText,
   Settings as SettingsIcon,
@@ -25,7 +24,9 @@ import {
 import { useAuth, type Alert } from "./AuthProvider";
 import { MailCheck } from "lucide-react";
 import { useTheme } from "../contexts/ThemeContext";
-import { useEffect, useRef, useState } from "react";
+import { useScanContext } from "../contexts/ScanContext";
+import { searchUserScans, type GlobalSearchResult } from "../search-utils";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 
 function alertAge(alert: Alert): string {
@@ -53,8 +54,12 @@ function alertColors(type: Alert["type"]) {
 
 export function RootLayout() {
   const navigate = useNavigate();
-  const { user, emailVerified, resendVerification, logout, alerts, unreadAlertCount, markAlertRead, markAllAlertsRead } = useAuth();
+  const { user, emailVerified, resendVerification, ensureEmailVerified, logout, alerts, unreadAlertCount, markAlertRead, markAllAlertsRead, firestoreError } = useAuth();
+  const { scans, firestoreOk } = useScanContext();
   const [verifySent, setVerifySent] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
 
   const handleResendVerification = async () => {
     try {
@@ -69,6 +74,19 @@ export function RootLayout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchResults = useMemo(
+    () => user ? searchUserScans(searchQuery, scans).slice(0, 8) : [],
+    [searchQuery, scans, user],
+  );
+
+  const chooseSearchResult = (result: GlobalSearchResult) => {
+    navigate(result.href);
+    setSearchOpen(false);
+    setSearchQuery("");
+    setActiveSearchIndex(0);
+  };
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -78,6 +96,9 @@ export function RootLayout() {
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
         setUserMenuOpen(false);
       }
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -85,10 +106,28 @@ export function RootLayout() {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") { setNotifOpen(false); setUserMenuOpen(false); }
+      if (e.key === "Escape") {
+        setNotifOpen(false);
+        setUserMenuOpen(false);
+        setSearchOpen(false);
+      }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    function handleSearchShortcut(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const isEditable = target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName ?? "");
+      if ((e.key === "/" && !isEditable) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k")) {
+        e.preventDefault();
+        setSearchOpen(true);
+        searchInputRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", handleSearchShortcut);
+    return () => document.removeEventListener("keydown", handleSearchShortcut);
   }, []);
 
   const navItems = [
@@ -96,7 +135,7 @@ export function RootLayout() {
     { path: "/assets", label: "Assets", icon: Database },
     { path: "/attack-graph", label: "Attack Graph", icon: Network },
     { path: "/exposure-map", label: "Exposure Map", icon: Globe },
-    { path: "/ai-risk", label: "AI Risk Center", icon: Brain },
+    { path: "/ai-risk", label: "Findings Analysis", icon: AlertTriangle },
     { path: "/monitoring", label: "Monitoring", icon: Activity },
     { path: "/reports", label: "Reports", icon: FileText },
     { path: "/settings", label: "Settings", icon: SettingsIcon },
@@ -207,16 +246,84 @@ export function RootLayout() {
               <span className="text-sm font-semibold">Vigil</span>
             </div>
 
-            {/* Search — hidden on xs, visible sm+ */}
-            <div className="hidden sm:block flex-1 max-w-2xl min-w-0">
+            {/* Search */}
+            <div className="flex-1 max-w-2xl min-w-0" ref={searchRef}>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                 <input
+                  ref={searchInputRef}
                   type="text"
-                  placeholder="Search assets, domains..."
-                  aria-label="Search assets and domains"
+                  value={searchQuery}
+                  placeholder="Search scans, assets, findings…"
+                  aria-label="Search your scans, assets, and findings"
+                  aria-keyshortcuts="Control+K Meta+K /"
+                  aria-haspopup="listbox"
+                  aria-expanded={searchOpen}
+                  aria-controls="global-search-results"
+                  aria-activedescendant={searchOpen && searchResults[activeSearchIndex] ? `search-result-${activeSearchIndex}` : undefined}
+                  onFocus={() => setSearchOpen(true)}
+                  onChange={event => {
+                    setSearchQuery(event.target.value);
+                    setActiveSearchIndex(0);
+                    setSearchOpen(true);
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === "ArrowDown" && searchResults.length) {
+                      event.preventDefault();
+                      setActiveSearchIndex(index => (index + 1) % searchResults.length);
+                    } else if (event.key === "ArrowUp" && searchResults.length) {
+                      event.preventDefault();
+                      setActiveSearchIndex(index => (index - 1 + searchResults.length) % searchResults.length);
+                    } else if (event.key === "Enter" && searchOpen && searchResults[activeSearchIndex]) {
+                      event.preventDefault();
+                      chooseSearchResult(searchResults[activeSearchIndex]);
+                    } else if (event.key === "Escape") {
+                      setSearchOpen(false);
+                    }
+                  }}
                   className={`w-full ${isDark ? "bg-white/5 border-white/10" : "bg-slate-100 border-slate-200"} border rounded-lg pl-10 pr-4 py-2 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)]`}
                 />
+                {searchOpen && (
+                  <div
+                    id="global-search-results"
+                    role="listbox"
+                    aria-label="Search results"
+                    className={`absolute left-0 top-full mt-2 w-[min(90vw,36rem)] max-h-96 overflow-y-auto rounded-xl border shadow-2xl z-50 ${
+                      isDark ? "bg-[#0d0d18] border-white/10" : "bg-white border-slate-200"
+                    }`}
+                  >
+                    {!searchQuery.trim() ? (
+                      <p className="px-4 py-3 text-sm text-gray-500">Search your scans, discovered assets, and findings. Press / or Ctrl+K to focus.</p>
+                    ) : !firestoreOk ? (
+                      <p className="px-4 py-3 text-sm text-amber-400" role="status">Search unavailable because scan data could not be loaded.</p>
+                    ) : searchResults.length === 0 ? (
+                      <p className="px-4 py-3 text-sm text-gray-500" role="status">No matching scans, assets, or findings.</p>
+                    ) : (
+                      searchResults.map((result, index) => (
+                        <button
+                          key={result.id}
+                          id={`search-result-${index}`}
+                          type="button"
+                          role="option"
+                          aria-selected={index === activeSearchIndex}
+                          onMouseEnter={() => setActiveSearchIndex(index)}
+                          onClick={() => chooseSearchResult(result)}
+                          className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${
+                            index === activeSearchIndex ? "bg-[color:var(--accent-muted)]" : "hover:bg-white/5"
+                          }`}
+                        >
+                          <span className="mt-0.5 text-[color:var(--accent-text)]" aria-hidden="true">
+                            {result.kind === "scan" ? <Activity className="w-4 h-4" /> : result.kind === "asset" ? <Database className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium">{result.title}</span>
+                            <span className="block truncate text-xs text-gray-500">{result.description}</span>
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -276,7 +383,7 @@ export function RootLayout() {
                   <div className={`max-h-96 overflow-y-auto divide-y ${isDark ? "divide-white/5" : "divide-slate-100"}`}>
                     {alerts.length === 0 ? (
                       <div className="px-4 py-8 text-center text-gray-500 text-sm">
-                        No notifications yet
+                        {firestoreError ? "Notifications unavailable — check Firestore access and try again." : "No notifications yet"}
                       </div>
                     ) : (
                       alerts.map((alert) => (
@@ -386,7 +493,7 @@ export function RootLayout() {
           <div className="relative z-10 flex items-center justify-between gap-3 bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 text-sm flex-wrap">
             <div className="flex items-center gap-2 text-amber-300">
               <MailCheck className="w-4 h-4 flex-shrink-0" />
-              <span>Check your inbox — verify your email before starting scans or exporting reports.</span>
+              <span>Check your inbox — verify your email before starting scans, exporting reports, or changing account and team settings.</span>
             </div>
             <button
               onClick={handleResendVerification}
@@ -394,6 +501,12 @@ export function RootLayout() {
               className="text-xs font-medium text-amber-400 hover:text-amber-200 underline underline-offset-2 disabled:opacity-50 flex-shrink-0"
             >
               {verifySent ? "Email sent ✓" : "Resend email"}
+            </button>
+            <button
+              onClick={() => { void ensureEmailVerified(); }}
+              className="text-xs font-medium text-amber-400 hover:text-amber-200 underline underline-offset-2 flex-shrink-0"
+            >
+              I verified — refresh
             </button>
           </div>
         )}

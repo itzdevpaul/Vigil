@@ -1,7 +1,7 @@
 import { useParams, Link } from "react-router";
 import {
   ArrowLeft, Shield, Activity, Clock, AlertTriangle,
-  Sparkles, Lock, Database, Cpu, Globe, ExternalLink,
+  Activity, Lock, Database, Cpu, Globe, ExternalLink,
   CheckCircle2, XCircle, Server,
 } from "lucide-react";
 import { useScanContext } from "../contexts/ScanContext";
@@ -74,9 +74,9 @@ export function AssetDetail() {
             </div>
           </div>
           <div className="sm:text-right">
-            <div className="text-sm text-gray-400 mb-1">Risk Score</div>
+            <div className="text-sm text-gray-400 mb-1">Finding Severity Score</div>
             <div className={`text-4xl font-bold ${risk?.color || "text-gray-500"}`}>{asset ? asset.riskScore : "--"}</div>
-            {risk && <div className={`text-sm font-semibold mt-1 ${risk.color}`}>{risk.label} Risk</div>}
+            {risk && <div className={`text-sm font-semibold mt-1 ${risk.color}`}>{risk.label} severity</div>}
             {asset?.ipAddress && (
               <div className="text-xs text-gray-500 mt-1 font-mono">{asset.ipAddress}</div>
             )}
@@ -98,24 +98,25 @@ export function AssetDetail() {
         </div>
       </div>
 
-      {/* AI Insight */}
+      {/* Finding Summary */}
       <div className="rounded-xl bg-gradient-to-br from-purple-500/10 to-blue-500/10 backdrop-blur-xl border border-purple-500/30 p-5 md:p-6">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-            <Sparkles className="w-6 h-6 text-purple-400" />
+            <Activity className="w-6 h-6 text-purple-400" />
           </div>
           <div className="flex-1">
-            <h3 className="text-lg font-semibold mb-2">Vigil AI Risk Analysis</h3>
+            <h3 className="text-lg font-semibold mb-2">Finding Summary</h3>
+            <p className="text-xs text-gray-500 mb-2">Based on scanner output only; not an AI assessment or validated risk score.</p>
             {assetFindings.length === 0 ? (
-              <p className="text-gray-400 text-sm">No scan findings for this asset yet. Run a scan from Monitoring to generate findings.</p>
+              <p className="text-gray-400 text-sm">No findings are recorded for this asset in the available scan results.</p>
             ) : (
               <div className="space-y-2">
                 <p className="text-gray-300 text-sm">
                   {criticalFindings.length > 0
-                    ? `⚠️ ${criticalFindings.length} critical finding${criticalFindings.length > 1 ? "s" : ""} require immediate attention.`
+                    ? `${criticalFindings.length} critical finding${criticalFindings.length > 1 ? "s are" : " is"} recorded for this asset.`
                     : highFindings.length > 0
                     ? `${highFindings.length} high-severity finding${highFindings.length > 1 ? "s" : ""} detected.`
-                    : `${assetFindings.length} finding${assetFindings.length > 1 ? "s" : ""} detected. No critical issues.`}
+                    : `${assetFindings.length} finding${assetFindings.length > 1 ? "s are" : " is"} recorded. No critical findings are present in these results.`}
                   {" "}
                   {asset?.technologies?.length > 0 && `Technologies detected: ${asset.technologies.slice(0, 2).join(", ")}.`}
                 </p>

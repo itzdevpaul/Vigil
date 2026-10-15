@@ -1,0 +1,20 @@
+services:
+  scan-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.scan-worker
+    restart: unless-stopped
+    init: true
+    environment:
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?Set FIREBASE_PROJECT_ID}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
+      VIGIL_SCAN_ALLOWED_TARGETS: ${VIGIL_SCAN_ALLOWED_TARGETS:?Set an explicit target allowlist}
+      VIGIL_SCAN_MAX_HOSTS: ${VIGIL_SCAN_MAX_HOSTS:-256}
+      VIGIL_SCAN_POLL_MS: ${VIGIL_SCAN_POLL_MS:-3000}
+      WORKER_ID: ${WORKER_ID:-compose-worker}
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS:?Set GOOGLE_APPLICATION_CREDENTIALS}:/run/secrets/firebase-admin.json:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

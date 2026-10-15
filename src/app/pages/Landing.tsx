@@ -1,119 +1,100 @@
 import { Link } from "react-router";
 import { useState, useEffect } from "react";
 import {
-  Eye, Zap, Globe, Lock, Activity, ChevronRight,
-  CheckCircle2, AlertTriangle, Server, Cloud, Database,
-  ArrowRight, Users, BarChart3, Search, Bell,
-  Cpu, Network, FileText, Menu, X, Shield,
+  Globe, Activity, ChevronRight, CheckCircle2, AlertTriangle, Server,
+  Database, ArrowRight, BarChart3, Search, Cpu, FileText, Menu, X, Shield,
 } from "lucide-react";
 
 const STATS = [
-  { value: "50K+", label: "Assets Scanned", icon: Server },
-  { value: "2.4M", label: "Vulnerabilities Found", icon: AlertTriangle },
-  { value: "99.9%", label: "Platform Uptime", icon: Activity },
-  { value: "340ms", label: "Avg Scan Response", icon: Zap },
+  { value: "Nmap", label: "TCP connect and service discovery", icon: Server },
+  { value: "Nuclei", label: "Safe misconfiguration checks", icon: Shield },
+  { value: "Worker-reported", label: "Progress and results", icon: Activity },
+  { value: "Optional", label: "OSINT proxy when configured", icon: Globe },
 ];
 
 const FEATURES = [
   {
-    icon: Search,
+    icon: Server,
     color: "cyan",
-    title: "Continuous Asset Discovery",
-    desc: "Automatically enumerate subdomains, APIs, cloud assets, and services across your entire attack surface. Real-time DNS resolution via HackerTarget and Google DoH.",
+    title: "Server-Side Scan Jobs",
+    desc: "Queue checks for authorized targets. Scans run only through a configured server-side worker; the browser never performs network scans.",
   },
   {
-    icon: AlertTriangle,
+    icon: Search,
     color: "orange",
-    title: "CVE & Vulnerability Detection",
-    desc: "Detect 20+ vulnerability classes including RCE, SQLi, XSS, SSRF, and authentication bypasses. Mapped to CVSS scoring and NVD CVE database in real time.",
+    title: "Nmap Service Discovery",
+    desc: "Use allowlisted Nmap TCP connect scans to discover responding ports and identify services on authorized targets.",
   },
   {
-    icon: Eye,
+    icon: Shield,
     color: "purple",
-    title: "Attack Graph Visualization",
-    desc: "Visualize lateral movement paths, trust relationships, and exploit chains across your infrastructure with interactive SVG attack graphs.",
+    title: "Safe Misconfiguration Checks",
+    desc: "Run safe Nuclei checks for supported misconfiguration findings. Results appear only after the worker executes the checks.",
   },
   {
-    icon: Cloud,
+    icon: Globe,
     color: "blue",
-    title: "Multi-Cloud Coverage",
-    desc: "Scan AWS, GCP, and Azure assets. Detect misconfigured S3 buckets, exposed IAM roles, open security groups, and unauthenticated cloud services.",
+    title: "Optional OSINT Proxy",
+    desc: "Third-party OSINT lookups are available only when an operator configures the optional proxy. Vigil does not claim cloud inventory coverage.",
   },
   {
     icon: Shield,
     color: "green",
-    title: "AI Risk Intelligence",
-    desc: "ML-powered risk scoring aggregates findings across ports, CVEs, technologies, and certificates into a single prioritized risk score per asset.",
+    title: "Findings From Scan Jobs",
+    desc: "Review findings and discovered services returned by real scan jobs, with severity details where the scanner provides them.",
   },
   {
     icon: FileText,
     color: "pink",
-    title: "Compliance Reporting",
-    desc: "Generate executive summaries, technical audit reports, and compliance documentation. Export findings in structured formats for SOC2, ISO 27001, and PCI-DSS.",
+    title: "Scan Reports",
+    desc: "Generate reports from scan data available in your account. Reports are not compliance attestations or certification evidence.",
   },
   {
-    icon: Bell,
+    icon: Activity,
     color: "yellow",
-    title: "Real-Time Alerting",
-    desc: "Instant notifications for critical findings, new asset discovery, and scan completion. Configurable alert thresholds per severity and asset type.",
+    title: "Worker-Reported Progress",
+    desc: "Follow queued, running, and finished job states reported by the worker. Vigil does not provide continuous monitoring.",
   },
   {
-    icon: Network,
+    icon: Database,
     color: "teal",
-    title: "Exposure Map",
-    desc: "Infrastructure heat-map clusters assets by type and risk, showing the blast radius of compromised components across your environment.",
+    title: "Account-Scoped History",
+    desc: "Review scan jobs and their returned results within your signed-in account. No sample production targets or fabricated scan counts.",
   },
 ];
 
 const HOW_IT_WORKS = [
   {
     step: "01",
-    title: "Connect Your Target",
-    desc: "Enter a domain, IP range, or cloud environment. Vigil's scan engine immediately begins DNS resolution and asset enumeration.",
+    title: "Choose an Authorized Target",
+    desc: "Create a scan job only for a target you are authorized to assess and that is permitted by the server-side worker allowlist.",
     icon: Globe,
   },
   {
     step: "02",
-    title: "Deep Scan & Enumerate",
-    desc: "Port discovery, service detection, TLS inspection, and technology fingerprinting run in parallel across all discovered assets.",
+    title: "Queue the Scan",
+    desc: "The job waits for a configured server-side worker. The dashboard reports progress only while the worker is running.",
     icon: Cpu,
   },
   {
     step: "03",
-    title: "Vulnerability Assessment",
-    desc: "Each asset is analyzed against 20+ vulnerability categories using CVE databases, threat intelligence feeds, and VirusTotal integration.",
+    title: "Run Supported Checks",
+    desc: "The worker uses Nmap TCP connect and service discovery, with safe Nuclei misconfiguration checks where configured.",
     icon: Shield,
   },
   {
     step: "04",
-    title: "Prioritize & Remediate",
-    desc: "AI-ranked findings with CVSS scores, CVE links, and step-by-step remediation guidance. Generate reports for your security team.",
+    title: "Review Returned Results",
+    desc: "Inspect the output recorded by the worker and generate a report from actual scan data. No findings are shown until tools have run.",
     icon: BarChart3,
   },
 ];
 
 const SCAN_TYPES = [
-  { name: "Full Infrastructure", time: "~10 min", badge: "Most Popular" },
-  { name: "Port Scan", time: "~2 min", badge: null },
-  { name: "Subdomain Enumeration", time: "~3 min", badge: null },
-  { name: "Cloud Asset Discovery", time: "~5 min", badge: null },
-  { name: "Certificate Validation", time: "~1 min", badge: null },
-  { name: "Vulnerability Scan", time: "~8 min", badge: "Deep" },
-  { name: "API Discovery", time: "~4 min", badge: null },
-];
-
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "text-red-300 bg-red-500/15 border-red-500/30",
-  high: "text-orange-300 bg-orange-500/15 border-orange-500/30",
-  medium: "text-yellow-300 bg-yellow-500/15 border-yellow-500/30",
-  low: "text-green-300 bg-green-500/15 border-green-500/30",
-};
-
-const SAMPLE_FINDINGS = [
-  { title: "Log4Shell RCE — Apache Log4j2", severity: "critical", cvss: "10.0", cve: "CVE-2021-44228", asset: "api.example.com" },
-  { title: "HTTP/2 Rapid Reset (DoS)", severity: "high", cvss: "7.5", cve: "CVE-2023-44487", asset: "cdn.example.com" },
-  { title: "TLS 1.0/1.1 Deprecated Protocol", severity: "medium", cvss: "5.9", cve: null, asset: "mail.example.com" },
-  { title: "Missing HTTP Security Headers", severity: "low", cvss: "3.1", cve: null, asset: "www.example.com" },
+  { name: "Nmap TCP connect scanning", time: "Server-side worker", badge: null },
+  { name: "Nmap service discovery", time: "Worker-reported output", badge: null },
+  { name: "Safe Nuclei misconfiguration checks", time: "When configured", badge: null },
+  { name: "Optional third-party OSINT proxy", time: "Only when enabled", badge: null },
 ];
 
 const colorMap: Record<string, string> = {
@@ -247,20 +228,19 @@ export function Landing() {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-medium mb-8">
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-            Scan. Monitor. Detect
+            Authorized scans. Verifiable results.
           </div>
 
           <h1 className="text-4xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight mb-6 leading-tight text-white">
-            Vigil keeps watch
+            Run focused checks
             <br />
             <span className="bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-500 bg-clip-text text-transparent">
-              over your web app.
+              on your own targets.
             </span>
           </h1>
 
           <p className="text-lg sm:text-xl text-gray-300 max-w-3xl mx-auto mb-10 leading-relaxed">
-            Continuous monitoring for uptime, user flows, scans, and risk signals —
-            so you can fix issues before they affect users.
+            Vigil queues authorized jobs for an allowlisted server-side worker using Nmap TCP connect and service discovery, plus safe Nuclei misconfiguration checks. Scan status and results appear only when tools run.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
@@ -268,7 +248,7 @@ export function Landing() {
               to="/login"
               className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold text-lg hover:opacity-90 transition-all shadow-2xl shadow-cyan-500/25 w-full sm:w-auto justify-center"
             >
-              Start Monitoring
+              Open Vigil
               <ArrowRight className="w-5 h-5" />
             </Link>
             <a
@@ -293,11 +273,11 @@ export function Landing() {
         </div>
       </section>
 
-      {/* ── LIVE DEMO PREVIEW ────────────────────────────────────────────────── */}
+      {/* ── PRODUCT PREVIEW ──────────────────────────────────────────────────── */}
       <section className="py-16 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="rounded-2xl bg-[#0d0d18] border border-[#1e1e2e] overflow-hidden shadow-2xl shadow-black/50">
-            {/* Fake browser bar */}
+            {/* Illustrative interface, not live account data */}
             <div className="bg-[#0a0a12] border-b border-[#1a1a28] px-4 py-3 flex items-center gap-3">
               <div className="flex gap-1.5">
                 <div className="w-3 h-3 rounded-full bg-red-500/70" />
@@ -305,18 +285,21 @@ export function Landing() {
                 <div className="w-3 h-3 rounded-full bg-green-500/70" />
               </div>
               <div className="flex-1 bg-[#111118] rounded-md px-3 py-1 text-xs text-gray-400 font-mono text-center border border-[#1e1e2e]">
-                app.vigil.com.ng — Security Dashboard
+                Illustrative dashboard — not live scan data
               </div>
             </div>
             {/* Mock dashboard content */}
             <div className="p-6 space-y-4">
-              {/* Top metrics */}
+              <p className="text-xs text-cyan-300 border border-cyan-500/20 bg-cyan-500/5 rounded-lg px-3 py-2">
+                Product illustration only. Live scan status and findings appear in your account after an authorized worker runs a job.
+              </p>
+              {/* Capabilities, not fabricated live counts */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
-                  { label: "Total Findings", val: "47", color: "text-orange-300" },
-                  { label: "Completed Scans", val: "8", color: "text-green-300" },
-                  { label: "Active Scans", val: "2", color: "text-cyan-300" },
-                  { label: "Assets Found", val: "63", color: "text-purple-300" },
+                  { label: "Port discovery", val: "Nmap TCP connect", color: "text-cyan-300" },
+                  { label: "Service details", val: "Worker output", color: "text-green-300" },
+                  { label: "Misconfiguration", val: "Safe Nuclei checks", color: "text-orange-300" },
+                  { label: "OSINT proxy", val: "Optional setup", color: "text-purple-300" },
                 ].map(m => (
                   <div key={m.label} className="bg-[#111118] rounded-lg border border-[#1e1e2e] p-3">
                     <div className={`text-2xl font-bold ${m.color}`}>{m.val}</div>
@@ -324,28 +307,16 @@ export function Landing() {
                   </div>
                 ))}
               </div>
-              {/* Sample findings table */}
+              {/* Illustrative output types, not sample scan results */}
               <div className="rounded-lg bg-[#0a0a12] border border-[#1a1a28] overflow-hidden">
                 <div className="px-4 py-2.5 border-b border-[#1a1a28] flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-orange-400" />
-                  <span className="text-sm font-semibold text-gray-100">Latest Findings</span>
+                  <span className="text-sm font-semibold text-gray-100">Possible output categories</span>
                 </div>
-                <div className="divide-y divide-[#1a1a28]">
-                  {SAMPLE_FINDINGS.map((f, i) => (
-                    <div key={i} className="flex items-center justify-between px-4 py-3 text-sm">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className={`px-2 py-0.5 rounded text-xs font-semibold border ${SEVERITY_COLORS[f.severity]}`}>
-                          {f.severity}
-                        </span>
-                        <span className="text-gray-200 truncate font-medium">{f.title}</span>
-                      </div>
-                      <div className="flex items-center gap-3 flex-shrink-0 ml-3">
-                        {f.cve && <span className="text-xs text-gray-400 font-mono hidden sm:inline">{f.cve}</span>}
-                        <span className="text-xs text-gray-400 hidden md:inline">{f.asset}</span>
-                        <span className="text-xs font-bold text-white bg-[#1a1a28] px-1.5 py-0.5 rounded">{f.cvss}</span>
-                      </div>
-                    </div>
-                  ))}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 text-sm">
+                  <div className="rounded-lg border border-[#1e1e2e] bg-[#111118] p-3"><strong className="block text-gray-100">Open TCP ports</strong><span className="text-xs text-gray-400">Reported by Nmap when found</span></div>
+                  <div className="rounded-lg border border-[#1e1e2e] bg-[#111118] p-3"><strong className="block text-gray-100">Detected services</strong><span className="text-xs text-gray-400">Details depend on scanner output</span></div>
+                  <div className="rounded-lg border border-[#1e1e2e] bg-[#111118] p-3"><strong className="block text-gray-100">Misconfigurations</strong><span className="text-xs text-gray-400">Safe Nuclei checks, if returned</span></div>
                 </div>
               </div>
             </div>
@@ -358,10 +329,9 @@ export function Landing() {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <span className="text-xs font-semibold text-cyan-400 tracking-widest uppercase">Platform Capabilities</span>
-            <h2 className="text-3xl sm:text-4xl font-bold mt-3 mb-4 text-white">Everything You Need to Secure<br className="hidden sm:inline" /> Your Attack Surface</h2>
+            <h2 className="text-3xl sm:text-4xl font-bold mt-3 mb-4 text-white">Focused Scanning With<br className="hidden sm:inline" /> Results You Can Verify</h2>
             <p className="text-gray-300 max-w-2xl mx-auto text-base">
-              From continuous asset discovery to AI-powered risk scoring, Vigil covers the
-              entire vulnerability lifecycle in a single platform.
+              A practical view of authorized scan jobs, worker-reported progress, discovered services, and safe misconfiguration checks.
             </p>
           </div>
 
@@ -398,7 +368,7 @@ export function Landing() {
             <span className="text-xs font-semibold text-cyan-400 tracking-widest uppercase">Process</span>
             <h2 className="text-3xl sm:text-4xl font-bold mt-3 mb-4 text-white">How Vigil Works</h2>
             <p className="text-gray-300 max-w-xl mx-auto text-base">
-              From target entry to prioritized remediation in minutes — fully automated.
+              Scan jobs require an available server-side worker and only return data produced by the configured tools.
             </p>
           </div>
 
@@ -422,16 +392,15 @@ export function Landing() {
         </div>
       </section>
 
-      {/* ── SCAN TYPES ───────────────────────────────────────────────────────── */}
+      {/* ── SCAN CAPABILITIES ────────────────────────────────────────────────── */}
       <section className="py-16 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div>
-              <span className="text-xs font-semibold text-cyan-400 tracking-widest uppercase">Scan Modes</span>
-              <h2 className="text-3xl font-bold mt-3 mb-4 text-white">7 Specialized Scan Types</h2>
+              <span className="text-xs font-semibold text-cyan-400 tracking-widest uppercase">Scan Capabilities</span>
+              <h2 className="text-3xl font-bold mt-3 mb-4 text-white">What the Worker Runs</h2>
               <p className="text-gray-300 mb-8 leading-relaxed text-base">
-                Each scan mode is optimized for a specific attack surface. Run a 10-minute full
-                infrastructure scan for a complete picture, or focus on specific vectors.
+                These are the supported scanner components, not separate cloud, API, certificate, or continuous-monitoring products. Availability depends on your server-side worker configuration.
               </p>
               <Link
                 to="/login"
@@ -462,15 +431,13 @@ export function Landing() {
       {/* ── TECH STACK / INTEGRATIONS ────────────────────────────────────────── */}
       <section className="py-16 px-4 border-y border-[#1a1a28]">
         <div className="max-w-6xl mx-auto">
-          <p className="text-center text-xs text-gray-500 uppercase tracking-widest mb-8 font-semibold">Intelligence Powered By</p>
+          <p className="text-center text-xs text-gray-500 uppercase tracking-widest mb-8 font-semibold">Scanning Components</p>
           <div className="flex flex-wrap items-center justify-center gap-8 opacity-70">
             {[
-              { name: "HackerTarget", icon: Search },
-              { name: "VirusTotal", icon: Shield },
-              { name: "NVD / CVE", icon: Database },
-              { name: "Google DoH", icon: Globe },
-              { name: "Firebase", icon: Cloud },
-              { name: "Let's Encrypt", icon: Lock },
+              { name: "Nmap TCP connect", icon: Server },
+              { name: "Nmap service discovery", icon: Search },
+              { name: "Safe Nuclei checks", icon: Shield },
+              { name: "Optional OSINT proxy", icon: Globe },
             ].map(t => (
               <div key={t.name} className="flex items-center gap-2 text-gray-300">
                 <t.icon className="w-4 h-4" />
@@ -485,32 +452,35 @@ export function Landing() {
       <section id="pricing" className="py-24 px-4">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
-            <span className="text-xs font-semibold text-cyan-400 tracking-widest uppercase">Pricing</span>
-            <h2 className="text-3xl sm:text-4xl font-bold mt-3 mb-4 text-white">Simple, Transparent Pricing</h2>
-            <p className="text-gray-300 max-w-xl mx-auto text-base">Start free. Scale as you grow. No hidden fees.</p>
+            <span className="text-xs font-semibold text-cyan-400 tracking-widest uppercase">Availability</span>
+            <h2 className="text-3xl sm:text-4xl font-bold mt-3 mb-4 text-white">Current Capabilities and Limits</h2>
+            <p className="text-gray-300 max-w-xl mx-auto text-base">No commercial plan tiers or usage quotas are currently configured in Vigil.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
             {[
               {
-                name: "Starter",
-                price: "Free",
-                sub: "Forever",
-                highlight: false,
-                features: ["5 scans/month", "3 concurrent assets", "Basic vulnerability detection", "7-day scan history", "Email alerts"],
-              },
-              {
-                name: "Professional",
-                price: "$49",
-                sub: "per month",
+                name: "Available",
+                price: "Scan jobs",
+                sub: "worker required",
                 highlight: true,
-                features: ["Unlimited scans", "50 concurrent assets", "Full CVE database access", "AI risk scoring", "VirusTotal integration", "Compliance reports", "API access", "Priority support"],
+                features: [
+                  { text: "Authorized, allowlisted server-side jobs", available: true },
+                  { text: "Nmap TCP connect and service discovery", available: true },
+                  { text: "Safe Nuclei misconfiguration checks", available: true },
+                  { text: "Progress and results only when tools run", available: true },
+                ],
               },
               {
-                name: "Enterprise",
-                price: "Custom",
-                sub: "Contact us",
+                name: "Not offered",
+                price: "Unavailable",
+                sub: "not part of this product",
                 highlight: false,
-                features: ["Unlimited everything", "Custom scan policies", "SSO / SAML", "Dedicated infrastructure", "SLA guarantee", "Security team onboarding", "Custom integrations"],
+                features: [
+                  { text: "Managed or continuous scanning service", available: false },
+                  { text: "Broad CVE coverage or AI/ML risk scoring", available: false },
+                  { text: "Cloud inventory, compliance readiness, or certification", available: false },
+                  { text: "Unlimited quotas, API keys, or an SLA", available: false },
+                ],
               },
             ].map(plan => (
               <div key={plan.name} className={`rounded-2xl border p-6 flex flex-col ${plan.highlight ? "bg-gradient-to-b from-cyan-500/10 to-blue-500/5 border-cyan-500/40 shadow-xl shadow-cyan-500/10" : "bg-[#0f0f1a] border-[#1e1e2e]"}`}>
@@ -526,31 +496,24 @@ export function Landing() {
                 </div>
                 <div className="border-t border-[#1e1e2e] my-5" />
                 <ul className="space-y-3 flex-1 mb-6">
-                  {plan.features.map(f => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-gray-200">
-                      <CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
-                      {f}
+                  {plan.features.map(feature => (
+                    <li key={feature.text} className="flex items-start gap-2 text-sm text-gray-200">
+                      {feature.available
+                        ? <CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
+                        : <X className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" />}
+                      {feature.text}
                     </li>
                   ))}
                 </ul>
-                {plan.price === "Custom" ? (
-                  <a
-                    href="mailto:support@vigil.com.ng"
-                    className="block text-center py-3 rounded-xl font-semibold text-sm transition-all bg-[#1a1a28] border border-[#2a2a3e] text-gray-200 hover:bg-[#1e1e2f] hover:text-white"
-                  >
-                    Contact Us
-                  </a>
-                ) : (
+                {plan.highlight ? (
                   <Link
                     to="/login"
-                    className={`block text-center py-3 rounded-xl font-semibold text-sm transition-all ${
-                      plan.highlight
-                        ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:opacity-90 shadow-lg shadow-cyan-500/20"
-                        : "bg-[#1a1a28] border border-[#2a2a3e] text-gray-200 hover:bg-[#1e1e2f] hover:text-white"
-                    }`}
+                    className="block text-center py-3 rounded-xl font-semibold text-sm transition-all bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:opacity-90 shadow-lg shadow-cyan-500/20"
                   >
-                    Get Started
+                    Open Vigil
                   </Link>
+                ) : (
+                  <div className="text-center py-3 rounded-xl border border-[#2a2a3e] text-gray-500 text-sm">Not currently available</div>
                 )}
               </div>
             ))}
@@ -568,17 +531,16 @@ export function Landing() {
                 <Shield className="w-8 h-8 text-white" />
               </div>
               <h2 className="text-3xl sm:text-4xl font-bold mb-4 text-white">
-                Ready to Secure Your Infrastructure?
+                Ready to Review Authorized Scan Results?
               </h2>
               <p className="text-gray-300 text-lg mb-8 max-w-xl mx-auto">
-                Join thousands of security teams using Vigil to stay ahead of attackers.
-                Start your first scan in under 60 seconds.
+                Use your configured server-side worker to run allowlisted checks. A dashboard alone does not perform scans.
               </p>
               <Link
                 to="/login"
                 className="inline-flex items-center gap-2 px-8 py-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-lg hover:opacity-90 transition-opacity shadow-2xl shadow-cyan-500/25"
               >
-                Start Free — No Credit Card Required
+                Sign In or Create an Account
                 <ArrowRight className="w-5 h-5" />
               </Link>
             </div>
@@ -598,7 +560,7 @@ export function Landing() {
                 <span className="font-bold text-white">VIGIL</span>
               </div>
               <p className="text-xs text-gray-400 leading-relaxed max-w-xs">
-                Continuous monitoring for your web app. Scan. Monitor. Detect.
+                Authorized server-side scan jobs with Nmap discovery and safe Nuclei checks.
               </p>
             </div>
             <div>
@@ -613,10 +575,10 @@ export function Landing() {
             <div>
               <h4 className="text-sm font-semibold mb-4 text-white">Security</h4>
               <ul className="space-y-2 text-sm text-gray-400">
-                <li>CVE Database</li>
-                <li>Attack Surface</li>
-                <li>Compliance</li>
-                <li>Vulnerability Mgmt</li>
+                <li>Nmap TCP connect scans</li>
+                <li>Service discovery</li>
+                <li>Safe misconfiguration checks</li>
+                <li>Optional OSINT proxy</li>
               </ul>
             </div>
             <div>
@@ -636,9 +598,7 @@ export function Landing() {
             <div className="flex items-center gap-4 text-xs text-gray-400">
               <Link to="/privacy" className="hover:text-gray-200 transition-colors">Privacy Policy</Link>
               <span className="text-gray-600">·</span>
-              <span>SOC2 Ready</span>
-              <span className="text-gray-600">·</span>
-              <span>ISO 27001</span>
+              <span>Not a managed or certified scanning service</span>
             </div>
           </div>
         </div>

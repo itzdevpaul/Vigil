@@ -83,8 +83,8 @@ export function AttackGraph() {
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold mb-1">Attack Graph</h1>
-          <p className="text-gray-400">Interactive network intelligence visualization</p>
+          <h1 className="text-2xl font-bold mb-1">Asset Grouping</h1>
+          <p className="text-gray-400">Illustrative grouping of scan assets—not observed network relationships.</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -102,6 +102,10 @@ export function AttackGraph() {
             <span className="hidden sm:inline">{fullscreen ? "Exit" : "Fullscreen"}</span>
           </button>
         </div>
+      </div>
+
+      <div role="note" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+        Lines in this view are generated for layout and grouping only. They do not represent confirmed connectivity, attack paths, or exploit chains.
       </div>
 
       {filtersOpen && (
@@ -140,9 +144,9 @@ export function AttackGraph() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         {[
           { label: "Total Nodes", value: nodes.length },
-          { label: "Attack Paths", value: edges.length },
-          { label: "Critical Nodes", value: criticalNodes, highlight: criticalNodes > 0 },
-          { label: "Avg Risk Score", value: avgRisk },
+          { label: "Illustrative Links", value: edges.length },
+          { label: "Assets with Critical Findings", value: criticalNodes, highlight: criticalNodes > 0 },
+          { label: "Average Finding Severity Score", value: avgRisk },
         ].map((item, i) => (
           <div key={i} className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 p-4">
             <div className={`text-2xl font-bold mb-1 ${item.highlight ? "text-red-400" : "text-gray-100"}`}>{item.value}</div>
@@ -153,13 +157,13 @@ export function AttackGraph() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 p-4">
-          <h3 className="text-sm font-semibold mb-3">Risk Level Legend</h3>
+          <h3 className="text-sm font-semibold mb-3">Highest Finding Severity Score</h3>
           <div className="grid grid-cols-2 gap-2 text-sm">
             {[
-              { color: "bg-red-500", label: "Critical Risk (75+)" },
-              { color: "bg-orange-500", label: "High Risk (50–74)" },
-              { color: "bg-yellow-500", label: "Medium Risk (30–49)" },
-              { color: "bg-green-500", label: "Low Risk (<30)" },
+              { color: "bg-red-500", label: "Critical (75+)" },
+              { color: "bg-orange-500", label: "High (50–74)" },
+              { color: "bg-yellow-500", label: "Medium (30–49)" },
+              { color: "bg-green-500", label: "Low (<30)" },
             ].map((item, i) => (
               <div key={i} className="flex items-center gap-2">
                 <div className={`w-8 h-0.5 ${item.color} rounded-full flex-shrink-0`} />
@@ -176,8 +180,8 @@ export function AttackGraph() {
           <ul className="space-y-1 text-xs text-gray-400">
             <li>• Click nodes to view asset details and findings</li>
             <li>• Use zoom controls to navigate the graph</li>
-            <li>• Dashed red edges indicate critical attack paths</li>
-            <li>• Node size reflects relative risk score</li>
+            <li>• Links group assets by the scan that discovered them; they are not observed paths</li>
+            <li>• Node size reflects the highest severity score in recorded findings</li>
           </ul>
         </div>
       </div>
@@ -210,10 +214,10 @@ export function AttackGraph() {
             </svg>
             <Shield className="w-16 h-16 text-gray-700 mb-4 relative z-10" />
             <h3 className="text-base font-semibold text-gray-400 mb-2 relative z-10">
-              {isRunning ? "Building attack graph…" : "No attack graph data yet"}
+              {isRunning ? "Building attack graph…" : "              No scan assets available"}
             </h3>
             <p className="text-sm text-gray-500 max-w-xs relative z-10">
-              {isRunning ? "Assets are being discovered. The graph will populate as the scan progresses." : "Run a scan from Monitoring to discover assets and visualize attack paths."}
+              {isRunning ? "Assets will appear when the worker records scan results." : "Run an authorized scan with a configured worker to group discovered assets. This view does not derive attack paths."}
             </p>
           </div>
         ) : (

@@ -3,18 +3,43 @@ import { Link } from "react-router";
 import { Search, Filter, Download, Database, X, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useScanContext } from "../contexts/ScanContext";
+import { useAuth } from "../components/AuthProvider";
 
 export function Assets() {
-  const { findings, completedCount, hasScans, assets } = useScanContext();
+  const { emailVerified, ensureEmailVerified } = useAuth();
+  const { findings, completedCount, hasScans, assets, firestoreOk } = useScanContext();
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all");
   const [filterRisk, setFilterRisk] = useState("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const handleExport = () => {
-    toast.info("Export prepared", {
-      description: "No assets to export yet. Add assets to enable export.",
-    });
+  const handleExport = async () => {
+    if (!(await ensureEmailVerified())) return;
+    if (!assets.length) {
+      toast.info("There are no assets available to export.");
+      return;
+    }
+    try {
+      const columns = ["Name", "Host", "IP Address", "Type", "Risk Score", "Discovered At"];
+      const escapeCsv = (value: unknown) => {
+        const text = String(value ?? "");
+        const safeText = /^[\t\r ]*[=+\-@]/.test(text) ? `'${text}` : text;
+        return `"${safeText.replace(/"/g, '""')}"`;
+      };
+      const rows = assets.map((asset) => [
+        asset.name, asset.host, asset.ipAddress, asset.type, asset.riskScore, asset.discoveredAt,
+      ]);
+      const csv = [columns, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\r\n");
+      const blobUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = `vigil-assets-${new Date().toISOString().slice(0, 10)}.csv`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      toast.success("Assets exported.");
+    } catch (err: any) {
+      toast.error("Asset export failed: " + (err?.message || "Unknown error"));
+    }
   };
 
   return (
@@ -24,7 +49,7 @@ export function Assets() {
         <div>
           <h1 className="text-2xl font-bold mb-1">Assets Explorer</h1>
           <p className="text-gray-400">
-            {hasScans ? `${findings} total findings from ${completedCount} completed scans` : "0 total assets discovered"}
+            {!firestoreOk ? "Asset data unavailable" : hasScans ? `${findings} total findings from ${completedCount} completed scans` : "0 assets discovered in available scan results"}
           </p>
         </div>
         <div className="flex gap-2">
@@ -41,13 +66,21 @@ export function Assets() {
           </button>
           <button
             onClick={handleExport}
-            className="px-3 md:px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 flex items-center gap-2 transition-all text-sm"
+            disabled={!emailVerified}
+            title={!emailVerified ? "Verify your email before exporting assets" : undefined}
+            className="px-3 md:px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 flex items-center gap-2 transition-all text-sm disabled:opacity-50"
           >
             <Download className="w-4 h-4" />
             <span className="hidden sm:inline">Export</span>
           </button>
         </div>
       </div>
+
+      {!firestoreOk && (
+        <div role="status" className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+          Scan records could not be loaded. No asset results are being shown.
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative">
@@ -127,17 +160,19 @@ export function Assets() {
                       <div className="w-16 h-16 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
                         <Database className="w-8 h-8 text-gray-600" />
                       </div>
-                      <h3 className="text-lg font-semibold text-gray-300 mb-2">No assets discovered</h3>
+                      <h3 className="text-lg font-semibold text-gray-300 mb-2">{firestoreOk ? "No assets discovered" : "Asset results unavailable"}</h3>
                       <p className="text-gray-500 text-sm max-w-sm mb-6">
-                        Start a scan from the Monitoring page to discover assets in your infrastructure.
+                        {firestoreOk ? "Start a scan from Monitoring to discover assets in your authorized targets." : "Check Firestore access and try again; this view does not use sample scan results."}
                       </p>
-                      <Link
-                        to="/monitoring"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-sm font-medium transition-all border border-cyan-500/30"
-                      >
-                        Go to Monitoring
-                        <ChevronRight className="w-4 h-4" />
-                      </Link>
+                      {firestoreOk && (
+                        <Link
+                          to="/monitoring"
+                          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-sm font-medium transition-all border border-cyan-500/30"
+                        >
+                          Go to Monitoring
+                          <ChevronRight className="w-4 h-4" />
+                        </Link>
+                      )}
                     </div>
                   </td>
                 </tr>

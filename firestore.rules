@@ -1,6 +1,9 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
 
     // Users can read/write their own profile
     match /users/{userId} {
@@ -9,7 +12,8 @@ service cloud.firestore {
 
     // Notification settings — own only
     match /notificationSettings/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if isVerified() && request.auth.uid == userId;
     }
 
     // Alerts — users can only read/write their own alerts
@@ -17,44 +21,93 @@ service cloud.firestore {
       allow read: if request.auth != null
         && request.auth.uid == resource.data.createdBy;
       allow create: if request.auth != null
+        && isVerified()
         && request.auth.uid == request.resource.data.createdBy;
       allow update, delete: if request.auth != null
+        && isVerified()
         && request.auth.uid == resource.data.createdBy;
     }
 
-    // Scan jobs — authenticated users can create and read; any authenticated user can update (scan engine runs client-side)
+    // Reports and scan jobs share this collection. Scan result fields are worker-owned;
+    // clients may only create their own acknowledged queued jobs and send controls.
     match /scans/{scanId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null;
-    }
-
-    // Assets — any authenticated user can read/write (populated by scan engine)
-    match /assets/{assetId} {
-      allow read, write: if request.auth != null;
-    }
-
-    // Findings — any authenticated user can read/write (populated by scan engine)
-    match /findings/{findingId} {
-      allow read, write: if request.auth != null;
-    }
-
-    // Reports — any authenticated user can create/read; update own reports
-    match /reports/{reportId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null;
-      allow delete: if request.auth != null
-        && request.auth.uid == resource.data.generatedBy;
-    }
-
-    // Integrations — keyed by userId_type, only owner can read/write
-    match /integrations/{integrationId} {
       allow read: if request.auth != null
-        && request.auth.uid == resource.data.connectedBy;
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null
-        && request.auth.uid == resource.data.connectedBy;
+        && request.auth.uid == resource.data.createdBy;
+      allow create: if request.auth != null
+        && isVerified()
+        && request.resource.data.createdBy == request.auth.uid
+        && (!("_isReport" in request.resource.data) || request.resource.data._isReport != true)
+        && request.resource.data.keys().hasOnly([
+          "name", "target", "scanType", "authorizationAcknowledged", "status",
+          "progress", "findings", "assetsDiscovered", "duration", "phase",
+          "_assets", "_findings", "createdBy", "createdAt", "startedAt", "completedAt"
+        ])
+        && request.resource.data.authorizationAcknowledged == true
+        && request.resource.data.status == "queued"
+        && request.resource.data.progress == 0
+        && request.resource.data.findings == 0
+        && request.resource.data.assetsDiscovered == 0
+        && request.resource.data._assets is list
+        && request.resource.data._assets.size() == 0
+        && request.resource.data._findings is list
+        && request.resource.data._findings.size() == 0
+        && request.resource.data.scanType in ["full", "port", "vulnerability"]
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.target is string
+        && request.resource.data.target.size() > 0
+        && request.resource.data.target.size() <= 253;
+      allow update: if request.auth != null
+        && isVerified()
+        && resource.data.createdBy == request.auth.uid
+        && (!("_isReport" in resource.data) || resource.data._isReport != true)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["controlRequest", "controlUpdatedAt"])
+        && request.resource.data.controlRequest in ["pause", "resume", "cancel"]
+        && ((resource.data.status in ["running", "queued"] && request.resource.data.controlRequest in ["pause", "cancel"])
+          || (resource.data.status == "paused" && request.resource.data.controlRequest in ["resume", "cancel"]));
+      allow delete: if request.auth != null
+        && isVerified()
+        && resource.data.createdBy == request.auth.uid
+        && (!("_isReport" in resource.data) || resource.data._isReport != true)
+        && resource.data.status in ["queued", "completed", "partial", "failed", "cancelled", "paused"];
+
+      // Existing report documents are client-owned, distinct from worker scan jobs.
+      allow create: if request.auth != null
+        && isVerified()
+        && request.resource.data._isReport == true
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.generatedBy == request.auth.uid
+        && request.resource.data.status in ["generating", "ready", "failed"];
+      allow update: if request.auth != null
+        && isVerified()
+        && resource.data._isReport == true
+        && resource.data.createdBy == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "downloadCount"])
+        && request.resource.data.status in ["generating", "ready", "failed"]
+        && request.resource.data.downloadCount is int
+        && request.resource.data.downloadCount >= resource.data.downloadCount;
+    }
+
+    // Current scan assets/findings are embedded in worker-owned scan documents.
+    match /assets/{assetId} {
+      allow read, write: if false;
+    }
+
+    match /findings/{findingId} {
+      allow read, write: if false;
+    }
+
+    // Legacy integration documents may contain plaintext credentials; migrate them
+    // through the authenticated server endpoint before any further use.
+    match /integrations/{integrationId} {
+      allow read, write: if false;
+    }
+
+    // Encrypted integration secrets are server-only, including their metadata.
+    match /integrationSecrets/{secretId} {
+      allow read, write: if false;
     }
 
     // Risk history — own snapshots only
@@ -62,9 +115,17 @@ service cloud.firestore {
       allow read: if request.auth != null
         && request.auth.uid == resource.data.userId;
       allow create: if request.auth != null
+        && isVerified()
         && request.auth.uid == request.resource.data.userId;
       allow update, delete: if request.auth != null
+        && isVerified()
         && request.auth.uid == resource.data.userId;
+    }
+
+    // Read-only worker heartbeat for authenticated dashboard status.
+    match /system/{docId} {
+      allow read: if request.auth != null && docId == "scanWorker";
+      allow write: if false;
     }
 
     // Team invites — sender owns invite, recipient can read by email query
@@ -74,12 +135,22 @@ service cloud.firestore {
         request.auth.token.email == resource.data.invitedEmail
       );
       allow create: if request.auth != null
-        && request.auth.uid == request.resource.data.invitedBy;
-      allow update: if request.auth != null && (
-        request.auth.uid == resource.data.invitedBy ||
-        request.auth.token.email == resource.data.invitedEmail
-      );
+        && isVerified()
+        && request.auth.uid == request.resource.data.invitedBy
+        && request.resource.data.status == "pending"
+        && request.resource.data.invitedEmail is string
+        && request.resource.data.invitedEmail.size() <= 254
+        && request.resource.data.role in ["Viewer", "Analyst", "Administrator"];
+      allow update: if request.auth != null
+        && isVerified()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status"])
+        && resource.data.status == "pending"
+        && request.resource.data.status in ["accepted", "declined"]
+        && ((request.auth.uid == resource.data.invitedBy && request.resource.data.status == "declined")
+          || (request.auth.token.email == resource.data.invitedEmail
+            && request.resource.data.status in ["accepted", "declined"]));
       allow delete: if request.auth != null
+        && isVerified()
         && request.auth.uid == resource.data.invitedBy;
     }
 

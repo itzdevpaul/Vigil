@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import {
-  Sparkles, Shield, Target, Brain, Zap, TrendingUp, AlertTriangle,
+  Shield, Zap, TrendingUp, AlertTriangle,
   ChevronRight, BarChart3, Clock, CheckCircle2,
 } from "lucide-react";
 import { useScanContext } from "../contexts/ScanContext";
@@ -14,36 +14,10 @@ function severityColor(sev: string) {
   return { bg: "bg-green-500/20", text: "text-green-400", border: "border-green-500/30", bar: "bg-green-500" };
 }
 
-function RiskGauge({ score }: { score: number }) {
-  const angle = (score / 100) * 180 - 90;
-  const r = 60;
-  const cx = 80, cy = 80;
-  const needleX = cx + r * Math.cos((angle * Math.PI) / 180);
-  const needleY = cy + r * Math.sin((angle * Math.PI) / 180);
-  const arcColor = score >= 75 ? "#ef4444" : score >= 50 ? "#f97316" : score >= 30 ? "#eab308" : "#22c55e";
-  return (
-    <svg viewBox="0 0 160 100" className="w-36 h-24">
-      <path d="M 20 80 A 60 60 0 0 1 140 80" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="12" strokeLinecap="round" />
-      <path
-        d={`M 20 80 A 60 60 0 0 1 ${cx + r * Math.cos(((score / 100 * 180 - 180) * Math.PI) / 180)} ${cy + r * Math.sin(((score / 100 * 180 - 180) * Math.PI) / 180)}`}
-        fill="none" stroke={arcColor} strokeWidth="12" strokeLinecap="round"
-      />
-      <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke="white" strokeWidth="2" strokeLinecap="round" />
-      <circle cx={cx} cy={cy} r={4} fill="white" />
-      <text x={cx} y={cy + 18} textAnchor="middle" fontSize="18" fontWeight="bold" fill="white">{score}</text>
-    </svg>
-  );
-}
-
 export function AIRiskCenter() {
-  const { findings, findingsList, completedCount, isRunning, hasScans, scans, assets } = useScanContext();
-  const [activeTab, setActiveTab] = useState<"predictions" | "trends" | "categories">("predictions");
-
-  const riskScore = hasScans
-    ? Math.max(15, 100 - Math.min(findings, 12) * 4 - completedCount * 3)
-    : null;
-
-  const statusText = isRunning ? "Scanning in progress" : hasScans ? "Analysis ready" : "Waiting for data";
+  const { findingsList, isRunning, hasScans, scans, assets, firestoreOk } = useScanContext();
+  const [activeTab, setActiveTab] = useState<"findings" | "distribution" | "categories">("findings");
+  const statusText = isRunning ? "Scan in progress" : hasScans ? "Results available" : "Waiting for scan results";
   const statusDot = isRunning ? "bg-cyan-400 animate-pulse" : hasScans ? "bg-green-400" : "bg-gray-500";
 
   const criticalFindings = findingsList.filter(f => f.severity === "critical");
@@ -51,7 +25,7 @@ export function AIRiskCenter() {
   const mediumFindings = findingsList.filter(f => f.severity === "medium");
   const lowFindings = findingsList.filter(f => f.severity === "low");
 
-  // Priority queue: deduplicated high+critical findings sorted by cvss
+  // Order recorded high-severity findings by the CVSS value returned by the scanner.
   const priorityQueue = [...findingsList]
     .filter(f => f.severity === "critical" || f.severity === "high")
     .sort((a, b) => (b.cvss || 0) - (a.cvss || 0))
@@ -79,23 +53,24 @@ export function AIRiskCenter() {
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
 
-  // Asset risk breakdown
-  const criticalAssets = assets.filter(a => a.riskScore >= 75);
-  const highAssets = assets.filter(a => a.riskScore >= 50 && a.riskScore < 75);
-
   // CVE count
   const cveCount = findingsList.filter(f => f.cve).length;
   const uniqueCves = new Set(findingsList.filter(f => f.cve).map(f => f.cve)).size;
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      {!firestoreOk && (
+        <div role="status" className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+          Scan data is unavailable. No scan findings are being shown.
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold mb-1 flex items-center gap-3">
-            <Brain className="w-7 h-7 text-purple-400" />
-            AI Risk Center
+            <AlertTriangle className="w-7 h-7 text-purple-400" />
+            Findings Analysis
           </h1>
-          <p className="text-gray-400">AI-powered security intelligence and risk prediction</p>
+          <p className="text-gray-400">Review scanner findings and their recorded severity. No AI or predictive risk scoring is provided.</p>
         </div>
         <div className="px-4 py-2 rounded-lg bg-purple-500/20 border border-purple-500/30 flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${statusDot}`} />
@@ -103,58 +78,17 @@ export function AIRiskCenter() {
         </div>
       </div>
 
-      {/* Global Risk Score */}
+      {/* Risk score availability */}
       <div className="rounded-xl bg-gradient-to-br from-purple-500/10 to-blue-500/10 backdrop-blur-xl border border-purple-500/30 p-5 md:p-6">
-        <div className="flex flex-wrap items-center gap-6">
+        <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
             <Shield className="w-6 h-6 text-purple-400" />
           </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold mb-1">Global Risk Score</h3>
-            <p className="text-sm text-gray-400 mb-3">Real-time AI assessment based on {findingsList.length} findings across {assets.length} assets</p>
-            {riskScore !== null ? (
-              <>
-                <div className="h-3 bg-black/40 rounded-full overflow-hidden mb-2">
-                  <div
-                    className={`h-full transition-all rounded-full ${riskScore >= 75 ? "bg-red-500" : riskScore >= 50 ? "bg-orange-500" : riskScore >= 30 ? "bg-yellow-500" : "bg-green-500"}`}
-                    style={{ width: `${riskScore}%` }}
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-4 mt-3 text-sm">
-                  <div>
-                    <div className="text-gray-400 text-xs">Critical Findings</div>
-                    <div className="text-red-400 font-bold text-lg">{criticalFindings.length}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400 text-xs">High Risk Assets</div>
-                    <div className="text-orange-400 font-bold text-lg">{criticalAssets.length + highAssets.length}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400 text-xs">Unique CVEs</div>
-                    <div className="text-purple-400 font-bold text-lg">{uniqueCves}</div>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-gray-400">Scan your infrastructure to get an AI-powered global risk assessment.</p>
-            )}
-          </div>
-          <div className="flex flex-col items-center">
-            {riskScore !== null ? (
-              <>
-                <RiskGauge score={riskScore} />
-                <div className={`text-xs font-semibold mt-1 ${riskScore >= 75 ? "text-red-400" : riskScore >= 50 ? "text-orange-400" : riskScore >= 30 ? "text-yellow-400" : "text-green-400"}`}>
-                  {riskScore >= 75 ? "Critical Risk" : riskScore >= 50 ? "High Risk" : riskScore >= 30 ? "Medium Risk" : "Low Risk"}
-                </div>
-              </>
-            ) : (
-              <div className="w-32 h-32 rounded-full border-8 border-white/10 flex items-center justify-center">
-                <div className="text-center">
-                  <Shield className="w-10 h-10 text-gray-600 mx-auto mb-1" />
-                  <div className="text-xs text-gray-500">No data</div>
-                </div>
-              </div>
-            )}
+          <div>
+            <h3 className="text-lg font-semibold mb-1">Global risk scoring is not available</h3>
+            <p className="text-sm text-gray-400">
+              Vigil does not generate AI/ML or validated risk scores. This page summarizes {findingsList.length} recorded findings across {assets.length} discovered assets; review scanner output in context.
+            </p>
           </div>
         </div>
       </div>
@@ -179,30 +113,30 @@ export function AIRiskCenter() {
       {/* Tabs */}
       <div>
         <div className="flex gap-1 p-1 rounded-lg bg-white/5 border border-white/10 w-fit mb-4">
-          {(["predictions", "trends", "categories"] as const).map(tab => (
+          {(["findings", "distribution", "categories"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-2 rounded-md text-sm transition-all capitalize ${activeTab === tab ? "bg-purple-500/20 text-purple-400" : "text-gray-400 hover:text-gray-200"}`}
             >
-              {tab === "predictions" ? "Attack Predictions" : tab === "trends" ? "Risk Trends" : "Categories"}
+              {tab === "findings" ? "Findings" : tab === "distribution" ? "Severity Distribution" : "Categories"}
             </button>
           ))}
         </div>
 
-        {activeTab === "predictions" && (
+        {activeTab === "findings" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Attack Path Prediction */}
+            {/* Finding list */}
             <div>
               <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                <Target className="w-5 h-5 text-red-400" />
-                Attack Path Prediction
+                <AlertTriangle className="w-5 h-5 text-red-400" />
+                High & Critical Findings
               </h2>
               <div className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 overflow-hidden">
                 {findingsList.length === 0 ? (
                   <div className="p-8 text-center">
                     <AlertTriangle className="w-10 h-10 text-gray-600 mx-auto mb-3" />
-                    <p className="text-gray-500 text-sm">No attack paths predicted yet</p>
+                    <p className="text-gray-500 text-sm">No high or critical findings are recorded in the available results.</p>
                     <Link to="/monitoring" className="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm border border-purple-500/30">
                       Start a Scan
                     </Link>
@@ -240,11 +174,11 @@ export function AIRiskCenter() {
               </div>
             </div>
 
-            {/* Priority Risk Queue */}
+            {/* Priority Findings */}
             <div>
               <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
                 <Zap className="w-5 h-5 text-yellow-400" />
-                Priority Risk Queue
+                Priority Findings
               </h2>
               <div className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 overflow-hidden">
                 {priorityQueue.length === 0 ? (
@@ -276,7 +210,7 @@ export function AIRiskCenter() {
           </div>
         )}
 
-        {activeTab === "trends" && (
+        {activeTab === "distribution" && (
           <div className="space-y-4">
             <div className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 p-5">
               <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">

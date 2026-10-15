@@ -1,0 +1,11 @@
+.git
+.replit
+.env
+.env.*
+**/.env
+**/.env.*
+**/*service-account*.json
+**/*firebase-admin*.json
+node_modules
+dist
+attached_assets

@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
 import {
   User, Bell, Shield, Key, Zap, Palette, Users,
-  Save, X, Copy, Plus, Trash2, Eye, EyeOff, Check, Mail, UserPlus, Clock,
+  Save, X, Check, UserPlus, Clock,
 } from "lucide-react";
 import { onSnapshot } from "firebase/firestore";
 import { useAuth } from "../components/AuthProvider";
 import { useTheme, ACCENT_CONFIGS, type AccentColor } from "../contexts/ThemeContext";
 import {
-  saveIntegration, sendTeamInvite, getMyInvitesSentQuery,
-  updateInviteStatus, type TeamInvite,
+  saveIntegration, deleteIntegration, getIntegrations, sendTeamInvite, getMyInvitesSentQuery,
+  updateInviteStatus, type Integration, type TeamInvite,
 } from "../../firebase";
 import { toast } from "sonner";
 
@@ -25,25 +25,30 @@ const NAV: { id: Section; label: string; icon: typeof User }[] = [
 ];
 
 const INTEGRATIONS = [
-  { name: "Slack", type: "slack", desc: "Alert notifications in Slack", icon: "💬", field: "webhookUrl", placeholder: "https://hooks.slack.com/services/..." },
-  { name: "PagerDuty", type: "pagerduty", desc: "Critical incident routing", icon: "🔔", field: "apiKey", placeholder: "pdp_..." },
-  { name: "Jira", type: "jira", desc: "Create tickets from findings", icon: "📋", field: "apiKey", placeholder: "ATL..." },
-  { name: "AWS Security Hub", type: "aws", desc: "Sync cloud security findings", icon: "☁️", field: "apiKey", placeholder: "AKIA..." },
-  { name: "Shodan", type: "shodan", desc: "Passive reconnaissance data", icon: "🔍", field: "apiKey", placeholder: "Your Shodan API key" },
-  { name: "VirusTotal", type: "virustotal", desc: "Malware and threat intelligence", icon: "🦠", field: "apiKey", placeholder: "Your VirusTotal API key" },
+  { name: "Slack", type: "slack", desc: "Credential record only; delivery is not verified here", icon: "💬", field: "webhookUrl", placeholder: "https://hooks.slack.com/services/..." },
+  { name: "PagerDuty", type: "pagerduty", desc: "Credential record only; connection is not verified here", icon: "🔔", field: "apiKey", placeholder: "pdp_..." },
+  { name: "Jira", type: "jira", desc: "Credential record only; connection is not verified here", icon: "📋", field: "apiKey", placeholder: "ATL..." },
+  { name: "AWS Security Hub", type: "aws", desc: "Credential record only; connection is not verified here", icon: "☁️", field: "apiKey", placeholder: "AKIA..." },
+  { name: "Shodan", type: "shodan", desc: "Credential record only; connection is not verified here", icon: "🔍", field: "apiKey", placeholder: "Your Shodan API key" },
+  { name: "VirusTotal", type: "virustotal", desc: "Credential record only; connection is not verified here", icon: "🦠", field: "apiKey", placeholder: "Your VirusTotal API key" },
 ];
 
 export function Settings() {
-  const { user, notificationSettings, updateNotificationSettings, isAdmin } = useAuth();
+  const {
+    user, emailVerified, ensureEmailVerified, updateAccountProfile, changePassword,
+    notificationSettings, updateNotificationSettings, isAdmin,
+  } = useAuth();
   const { theme, setTheme, accentColor, setAccentColor, isDark } = useTheme();
   const [active, setActive] = useState<Section>("account");
   const [nameVal, setNameVal] = useState(user?.displayName || "");
   const [saving, setSaving] = useState(false);
-  const [showApiKey, setShowApiKey] = useState(false);
   const [connectModal, setConnectModal] = useState<typeof INTEGRATIONS[0] | null>(null);
   const [connectValue, setConnectValue] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const [connectedTypes, setConnectedTypes] = useState<Set<string>>(new Set());
+  const [savedIntegrations, setSavedIntegrations] = useState<Map<string, Integration>>(new Map());
+  const [integrationLoadError, setIntegrationLoadError] = useState("");
+  const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   // ── Team state ─────────────────────────────────────────────────────────────
   const [invites, setInvites] = useState<(TeamInvite & { id: string })[]>([]);
@@ -60,7 +65,26 @@ export function Settings() {
     return unsub;
   }, [user?.uid]);
 
+  useEffect(() => {
+    if (!user?.uid) return;
+    let active = true;
+    setIntegrationLoadError("");
+    void getIntegrations(user.uid).then((items) => {
+      if (active) setSavedIntegrations(new Map(items.map((item) => [item.type, item])));
+    }).catch((error) => {
+      if (!active) return;
+      setSavedIntegrations(new Map());
+      setIntegrationLoadError(error?.message || "Unable to load saved integration configuration.");
+    });
+    return () => { active = false; };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    setNameVal(user?.displayName || "");
+  }, [user?.displayName]);
+
   const handleSendInvite = async () => {
+    if (!(await ensureEmailVerified())) return;
     if (!inviteEmail.trim()) { toast.error("Enter an email address."); return; }
     if (!user) return;
     setInviting(true);
@@ -72,16 +96,20 @@ export function Settings() {
         inviteEmail.trim(),
         inviteRole,
       );
+      const invitedAddress = inviteEmail.trim();
       setInviteEmail("");
-      toast.success(`Invite sent to ${inviteEmail.trim()}`);
+      toast.success(`In-app invite record created for ${invitedAddress}`, {
+        description: "The record was saved in Vigil. No email notification was sent.",
+      });
     } catch (err: any) {
-      toast.error("Failed to send invite: " + (err?.message || "Unknown error"));
+      toast.error("Failed to create invite record: " + (err?.message || "Unknown error"));
     } finally {
       setInviting(false);
     }
   };
 
   const handleRevokeInvite = async (inviteId: string) => {
+    if (!(await ensureEmailVerified())) return;
     setRevokingId(inviteId);
     try {
       await updateInviteStatus(inviteId, "declined");
@@ -93,14 +121,57 @@ export function Settings() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSaveProfile = async () => {
+    if (!(await ensureEmailVerified())) return;
+    if (!user) { toast.error("You must be signed in."); return; }
+    if (!nameVal.trim()) { toast.error("Display name cannot be empty."); return; }
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 800));
-    setSaving(false);
-    toast.success("Settings saved successfully");
+    try {
+      await updateAccountProfile(nameVal);
+      toast.success("Account profile saved.");
+    } catch (err: any) {
+      toast.error("Failed to save account profile: " + (err?.message || "Unknown error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleNotificationToggle = async (key: keyof typeof notificationSettings, value: boolean) => {
+    if (!(await ensureEmailVerified())) return;
+    try {
+      await updateNotificationSettings({ ...notificationSettings, [key]: value });
+    } catch (err: any) {
+      toast.error("Failed to save notification preference: " + (err?.message || "Unknown error"));
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    if (!(await ensureEmailVerified())) return;
+    if (!passwordForm.current) { toast.error("Enter your current password."); return; }
+    if (passwordForm.next.length < 6) { toast.error("New password must be at least 6 characters."); return; }
+    if (passwordForm.next !== passwordForm.confirm) { toast.error("New password and confirmation do not match."); return; }
+    setPasswordSaving(true);
+    try {
+      await changePassword(passwordForm.current, passwordForm.next);
+      setPasswordForm({ current: "", next: "", confirm: "" });
+      toast.success("Password changed successfully.");
+    } catch (err: any) {
+      const code = err?.code;
+      const message = code === "auth/wrong-password" || code === "auth/invalid-credential"
+        ? "Current password is incorrect."
+        : code === "auth/weak-password"
+          ? "New password must be at least 6 characters."
+          : code === "auth/requires-recent-login"
+            ? "Please sign out and sign in again before changing your password."
+            : err?.message || "Unknown error";
+      toast.error("Failed to change password: " + message);
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   const handleConnect = async () => {
+    if (!(await ensureEmailVerified())) return;
     if (!connectModal || !connectValue.trim()) {
       toast.error("Please enter a value.");
       return;
@@ -108,18 +179,31 @@ export function Settings() {
     if (!user) { toast.error("You must be signed in."); return; }
     setConnecting(true);
     try {
-      const data = connectModal.field === "webhookUrl"
-        ? { webhookUrl: connectValue }
-        : { apiKey: connectValue };
-      await saveIntegration(user.uid, connectModal.name, connectModal.type, data);
-      setConnectedTypes((prev) => new Set([...prev, connectModal.type]));
-      toast.success(`${connectModal.name} connected successfully`);
+      const saved = await saveIntegration(user.uid, connectModal.name, connectModal.type, connectValue);
+      setSavedIntegrations((prev) => new Map(prev).set(saved.type, saved));
+      toast.success(`${connectModal.name} credential stored securely`);
       setConnectModal(null);
       setConnectValue("");
     } catch (err: any) {
-      toast.error("Failed to connect: " + (err?.message || "Unknown error"));
+      toast.error("Failed to save integration configuration: " + (err?.message || "Unknown error"));
     } finally {
       setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async (integrationType: string, integrationName: string) => {
+    if (!(await ensureEmailVerified())) return;
+    if (!user) { toast.error("You must be signed in."); return; }
+    try {
+      await deleteIntegration(user.uid, integrationType);
+      setSavedIntegrations((prev) => {
+        const next = new Map(prev);
+        next.delete(integrationType);
+        return next;
+      });
+      toast.success(`${integrationName} configuration removed.`);
+    } catch (err: any) {
+      toast.error("Failed to remove integration configuration: " + (err?.message || "Unknown error"));
     }
   };
 
@@ -192,11 +276,11 @@ export function Settings() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1.5 text-gray-300">Workspace</label>
-                  <input type="text" defaultValue="Default Workspace" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)]" />
+                  <input type="text" value="Default Workspace" readOnly className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm opacity-60 cursor-not-allowed" />
                 </div>
               </div>
               <div className="flex flex-wrap gap-3">
-                <button onClick={handleSave} disabled={saving} style={{ ...accentStyle.muted, ...accentStyle.border, ...accentStyle.text }} className="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all disabled:opacity-60 hover:opacity-90">
+                <button onClick={handleSaveProfile} disabled={saving || !emailVerified} title={!emailVerified ? "Verify your email before changing account settings" : undefined} style={{ ...accentStyle.muted, ...accentStyle.border, ...accentStyle.text }} className="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all disabled:opacity-60 hover:opacity-90">
                   {saving ? <div style={{ borderTopColor: "var(--accent-primary)" }} className="w-4 h-4 border-2 border-gray-600 rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
                   {saving ? "Saving..." : "Save Changes"}
                 </button>
@@ -213,9 +297,9 @@ export function Settings() {
               <h2 className="text-lg font-semibold">Notification Preferences</h2>
               <div className="space-y-3">
                 {[
-                  { key: "criticalRiskAlerts" as const, label: "Critical Risk Alerts", desc: "Instant alerts for critical security risks" },
+                  { key: "criticalRiskAlerts" as const, label: "Critical Risk Alerts", desc: "Preference saved; delivery automation is not configured" },
                   { key: "newAssets" as const, label: "New Asset Discovery", desc: "Notify when new assets are discovered" },
-                  { key: "weeklyDigest" as const, label: "Weekly Digest", desc: "Summary report every Monday morning" },
+                  { key: "weeklyDigest" as const, label: "Weekly Digest", desc: "Preference saved; scheduled email delivery is not configured" },
                 ].map(({ key, label, desc }) => {
                   const on = notificationSettings?.[key] ?? false;
                   return (
@@ -225,9 +309,11 @@ export function Settings() {
                         <div className="text-xs text-gray-500">{desc}</div>
                       </div>
                       <button
-                        onClick={() => updateNotificationSettings({ ...notificationSettings, [key]: !on })}
+                        onClick={() => { void handleNotificationToggle(key, !on); }}
+                        disabled={!emailVerified}
+                        title={!emailVerified ? "Verify your email before changing account settings" : undefined}
                         style={on ? { backgroundColor: "var(--accent-primary)" } : {}}
-                        className={`w-11 h-6 rounded-full transition-colors flex-shrink-0 relative ${!on ? "bg-white/20" : ""}`}
+                        className={`w-11 h-6 rounded-full transition-colors flex-shrink-0 relative disabled:opacity-50 ${!on ? "bg-white/20" : ""}`}
                       >
                         <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${on ? "translate-x-5" : "translate-x-0"}`} />
                       </button>
@@ -235,9 +321,7 @@ export function Settings() {
                   );
                 })}
               </div>
-              <button onClick={handleSave} disabled={saving} style={{ ...accentStyle.muted, ...accentStyle.border, ...accentStyle.text }} className="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all hover:opacity-90">
-                <Save className="w-4 h-4" /> Save Preferences
-              </button>
+              <p className="text-xs text-gray-500">Preferences are stored in your account. Alert and digest delivery automation is not configured.</p>
             </div>
           )}
 
@@ -247,18 +331,17 @@ export function Settings() {
               <h2 className="text-lg font-semibold">Security Settings</h2>
               <div className="p-4 rounded-lg bg-black/40 border border-white/10 space-y-3">
                 <h3 className="font-medium text-sm">Change Password</h3>
-                <p className="text-sm text-gray-400">Update your account password</p>
-                <input type="password" placeholder="Current password" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)] text-gray-100" />
-                <input type="password" placeholder="New password" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)] text-gray-100" />
-                <input type="password" placeholder="Confirm new password" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)] text-gray-100" />
-                <button onClick={() => toast.success("Password update email sent.")} style={{ ...accentStyle.muted, ...accentStyle.border, ...accentStyle.text }} className="px-4 py-2 rounded-lg border text-sm font-medium transition-all hover:opacity-90">
-                  Update Password
+                <p className="text-sm text-gray-400">Re-enter your current password to confirm this change. Email/password accounts only.</p>
+                <input type="password" autoComplete="current-password" required value={passwordForm.current} onChange={(event) => setPasswordForm((form) => ({ ...form, current: event.target.value }))} placeholder="Current password" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)] text-gray-100" />
+                <input type="password" autoComplete="new-password" minLength={6} required value={passwordForm.next} onChange={(event) => setPasswordForm((form) => ({ ...form, next: event.target.value }))} placeholder="New password (at least 6 characters)" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)] text-gray-100" />
+                <input type="password" autoComplete="new-password" minLength={6} required value={passwordForm.confirm} onChange={(event) => setPasswordForm((form) => ({ ...form, confirm: event.target.value }))} placeholder="Confirm new password" className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)] text-gray-100" />
+                <button onClick={handlePasswordChange} disabled={passwordSaving || !emailVerified} title={!emailVerified ? "Verify your email before changing account settings" : undefined} style={{ ...accentStyle.muted, ...accentStyle.border, ...accentStyle.text }} className="px-4 py-2 rounded-lg border text-sm font-medium transition-all hover:opacity-90 disabled:opacity-60">
+                  {passwordSaving ? "Updating…" : "Update Password"}
                 </button>
               </div>
               <div className="p-4 rounded-lg bg-black/40 border border-white/10">
                 <h3 className="font-medium text-sm mb-1">Two-Factor Authentication</h3>
-                <p className="text-sm text-gray-400 mb-3">Add an extra layer of security to your account</p>
-                <button onClick={() => toast.info("2FA setup coming soon.")} className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm text-gray-300 transition-all">Enable 2FA</button>
+                <p className="text-sm text-gray-400">Two-factor authentication is not configured or available for this account in Vigil.</p>
               </div>
               <div className="p-4 rounded-lg bg-black/40 border border-white/10">
                 <h3 className="font-medium text-sm mb-1">Active Sessions</h3>
@@ -270,34 +353,10 @@ export function Settings() {
           {/* ── API Keys ── */}
           {active === "api-keys" && (
             <div className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 p-5 md:p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">API Keys</h2>
-                <button onClick={() => toast.info("API key generation coming soon.")} style={{ ...accentStyle.muted, ...accentStyle.border, ...accentStyle.text }} className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all hover:opacity-90">
-                  <Plus className="w-4 h-4" /> Generate Key
-                </button>
-              </div>
-              <p className="text-sm text-gray-400">API keys allow external services to authenticate with Vigil Security Platform.</p>
-              <div className="p-4 rounded-lg bg-black/40 border border-white/10">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm mb-1">Default Key</div>
-                    <div className="font-mono text-xs text-gray-400 break-all">
-                      {showApiKey ? "No key generated yet" : "vxa_sk_••••••••••••••••••••••••••••"}
-                    </div>
-                    <div className="text-xs text-gray-600 mt-1">Created — never</div>
-                  </div>
-                  <div className="flex gap-2 flex-shrink-0">
-                    <button onClick={() => setShowApiKey((v) => !v)} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 transition-all">
-                      {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                    <button onClick={() => toast.info("No key to copy.")} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-400 transition-all">
-                      <Copy className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => toast.error("No key to delete.")} className="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 transition-all">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
+              <h2 className="text-lg font-semibold">API Keys</h2>
+              <div role="status" className="p-4 rounded-lg bg-black/40 border border-white/10">
+                <p className="font-medium text-sm mb-1">Not available</p>
+                <p className="text-sm text-gray-400">Vigil does not currently provide a local application API-key service. No API key has been generated for this account.</p>
               </div>
             </div>
           )}
@@ -306,12 +365,14 @@ export function Settings() {
           {active === "integrations" && (
             <div className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 p-5 md:p-6 space-y-4">
               <h2 className="text-lg font-semibold">Integrations</h2>
-              <p className="text-sm text-gray-400">Connect Vigil with your existing security and operations stack. API keys are stored securely in Firestore.</p>
+              <p className="text-sm text-gray-400">Credentials are encrypted and stored for future integration support. Saving does not connect to or verify an external service, and saved credentials are never returned to this screen.</p>
+              {integrationLoadError && <p role="alert" className="text-sm text-red-400">{integrationLoadError}</p>}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {INTEGRATIONS.map((intg) => {
-                  const connected = connectedTypes.has(intg.type);
+                  const saved = savedIntegrations.get(intg.type);
+                  const configured = Boolean(saved?.configured);
                   return (
-                    <div key={intg.type} className={`p-4 rounded-lg border transition-all ${connected ? "bg-green-500/5 border-green-500/20" : "bg-black/40 border-white/10"}`}>
+                    <div key={intg.type} className={`p-4 rounded-lg border transition-all ${configured ? "bg-green-500/5 border-green-500/20" : "bg-black/40 border-white/10"}`}>
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center text-lg flex-shrink-0">{intg.icon}</div>
@@ -320,17 +381,29 @@ export function Settings() {
                             <div className="text-xs text-gray-500 truncate">{intg.desc}</div>
                           </div>
                         </div>
-                        {connected ? (
-                          <div className="flex items-center gap-1 px-2 py-1 rounded bg-green-500/20 text-green-400 text-xs flex-shrink-0">
-                            <Check className="w-3 h-3" /> Connected
+                        {configured ? (
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="flex items-center gap-1 px-2 py-1 rounded bg-green-500/20 text-green-400 text-xs">
+                              <Check className="w-3 h-3" /> •••• {saved?.lastFour}
+                            </div>
+                            <button
+                              onClick={() => { void handleDisconnect(intg.type, intg.name); }}
+                              disabled={!emailVerified}
+                              title={!emailVerified ? "Verify your email before changing integrations" : `Remove the saved ${intg.name} configuration`}
+                              className="px-2 py-1 rounded border border-red-500/30 bg-red-500/10 text-red-400 text-xs hover:bg-red-500/20 disabled:opacity-50"
+                            >
+                              Remove Configuration
+                            </button>
                           </div>
                         ) : (
                           <button
                             onClick={() => { setConnectModal(intg); setConnectValue(""); }}
+                            disabled={!emailVerified}
+                            title={!emailVerified ? "Verify your email before changing integrations" : undefined}
                             style={{ ...accentStyle.muted, ...accentStyle.border, ...accentStyle.text }}
-                            className="px-3 py-1.5 rounded-lg border text-xs font-medium transition-all flex-shrink-0 hover:opacity-90"
+                            className="px-3 py-1.5 rounded-lg border text-xs font-medium transition-all flex-shrink-0 hover:opacity-90 disabled:opacity-50"
                           >
-                            Connect
+                            Save Configuration
                           </button>
                         )}
                       </div>
@@ -409,14 +482,14 @@ export function Settings() {
             <div className="rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 p-5 md:p-6 space-y-6">
               <div>
                 <h2 className="text-lg font-semibold">Team Management</h2>
-                <p className="text-sm text-gray-400 mt-1">Invite teammates to collaborate on scans and findings.</p>
+                <p className="text-sm text-gray-400 mt-1">Create in-app invite records for teammates to collaborate on scans and findings. Vigil does not send an invite email.</p>
               </div>
 
               {/* Invite form */}
               <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
                 <h3 className="text-sm font-semibold flex items-center gap-2 text-gray-200">
                   <UserPlus className="w-4 h-4 text-cyan-400" />
-                  Invite a Teammate
+                  Create an In-App Invite
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="sm:col-span-2">
@@ -445,24 +518,25 @@ export function Settings() {
                 </div>
                 <button
                   onClick={handleSendInvite}
-                  disabled={inviting || !inviteEmail.trim()}
+                  disabled={inviting || !inviteEmail.trim() || !emailVerified}
+                  title={!emailVerified ? "Verify your email before inviting teammates" : undefined}
                   style={{ ...accentStyle.muted, ...accentStyle.border, ...accentStyle.text }}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all disabled:opacity-60 hover:opacity-90"
                 >
                   {inviting
                     ? <div style={{ borderTopColor: "var(--accent-primary)" }} className="w-4 h-4 border-2 border-gray-600 rounded-full animate-spin" />
-                    : <Mail className="w-4 h-4" />}
-                  {inviting ? "Sending…" : "Send Invite"}
+                    : <UserPlus className="w-4 h-4" />}
+                  {inviting ? "Creating…" : "Create Invite Record"}
                 </button>
               </div>
 
               {/* Invite list */}
               <div>
-                <h3 className="text-sm font-semibold text-gray-300 mb-3">Sent Invites</h3>
+                <h3 className="text-sm font-semibold text-gray-300 mb-3">In-App Invite Records</h3>
                 {invites.length === 0 ? (
                   <div className="rounded-xl border border-white/10 p-8 text-center">
                     <Users className="w-8 h-8 text-gray-600 mx-auto mb-3" />
-                    <p className="text-gray-500 text-sm">No invites sent yet</p>
+                    <p className="text-gray-500 text-sm">No invite records yet</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -490,9 +564,9 @@ export function Settings() {
                           {inv.status === "pending" && (
                             <button
                               onClick={() => handleRevokeInvite(inv.id)}
-                              disabled={revokingId === inv.id}
+                              disabled={revokingId === inv.id || !emailVerified}
+                              title={!emailVerified ? "Verify your email before changing team invites" : "Revoke invite"}
                               className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 transition-all disabled:opacity-50"
-                              title="Revoke invite"
                             >
                               {revokingId === inv.id
                                 ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
@@ -517,9 +591,9 @@ export function Settings() {
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{connectModal.icon}</span>
-                <h3 className="text-lg font-semibold">Connect {connectModal.name}</h3>
+                <h3 className="text-lg font-semibold">Save {connectModal.name} Configuration</h3>
               </div>
-              <button onClick={() => setConnectModal(null)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400">
+              <button onClick={() => { setConnectModal(null); setConnectValue(""); }} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400" aria-label="Close integration dialog">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -529,19 +603,20 @@ export function Settings() {
                   {connectModal.field === "webhookUrl" ? "Webhook URL" : "API Key"} <span className="text-red-400">*</span>
                 </label>
                 <input
-                  type="text"
+                  type={connectModal.field === "webhookUrl" ? "url" : "password"}
+                  autoComplete="off"
                   placeholder={connectModal.placeholder}
                   value={connectValue}
                   onChange={(e) => setConnectValue(e.target.value)}
                   className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2.5 text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-muted)] text-gray-100"
                 />
                 <p className="text-xs text-gray-500 mt-1.5">
-                  Your key is encrypted and stored securely in Firestore. It will never be shared.
+                  The value is encrypted on the server. Saving it only stores a credential record; Vigil does not currently connect to or use it.
                 </p>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setConnectModal(null)} className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-medium transition-all text-gray-300">
+              <button onClick={() => { setConnectModal(null); setConnectValue(""); }} className="flex-1 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-medium transition-all text-gray-300">
                 Cancel
               </button>
               <button
@@ -551,7 +626,7 @@ export function Settings() {
                 className="flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all disabled:opacity-60 flex items-center justify-center gap-2 hover:opacity-90"
               >
                 {connecting ? <div style={{ borderTopColor: "var(--accent-primary)" }} className="w-4 h-4 border-2 border-gray-600 rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
-                {connecting ? "Connecting..." : "Connect"}
+                {connecting ? "Saving..." : "Save Configuration"}
               </button>
             </div>
           </div>
